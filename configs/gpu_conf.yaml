@@ -1,0 +1,13 @@
+parameters:
+  Sod2dBuildTest:
+    branch:
+      values: [main, optimized]
+    rp:
+      values: [4]
+    use_gpu:
+      values: [true]
+    p_order:
+      values: [3, 4, 5]  # Optional: vary polynomial order
+  Sod2dSimulationTest:
+    n_elements:
+      values: [8, 16]  # Optional: vary mesh density
