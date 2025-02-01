@@ -7,6 +7,7 @@ from sod2d_bench.core.base_test import Sod2dBaseParams
 @rfm.simple_test
 class Sod2dSimulationTest(Sod2dBaseParams, rfm.RunOnlyRegressionTest):
     valid_systems       = ['*']
+    n_elements          = parameter([8, 16, 32]) 
     valid_prog_environs = ['sod2d-mesh']
     executable          = 'sod2d'
     num_tasks           = 4
