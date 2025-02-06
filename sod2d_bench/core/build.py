@@ -1,10 +1,18 @@
+import os
 import reframe as rfm
 import reframe.utility.sanity as sn
-import os
-from sod2d_bench.core.base_test import Sod2dBaseParams 
+from reframe.core.builtins import run_after, run_before, sanity_function, parameter
+from reframe.core.exceptions import SanityError
+from sod2d_bench.core.base_params import Sod2dBaseParams
 
 @rfm.simple_test
-class Sod2dBuildTest(Sod2dBaseParams, rfm.CompileOnlyRegressionTest):
+class Sod2dBuildTest(rfm.CompileOnlyRegressionTest):
+    branch     = parameter(['master', 'bsc-epicure-opt'])
+    precision  = parameter(['single', 'double'])
+    p_order    = parameter([3]) #, 4, 5
+
+    use_gpu    = parameter([True, False])
+
     build_type = parameter(['main', 'tools'])
     
     # Precision parameters with validation
@@ -13,7 +21,8 @@ class Sod2dBuildTest(Sod2dBaseParams, rfm.CompileOnlyRegressionTest):
     rp_avg = parameter([4, 8])
 
     valid_systems       = ['*']
-    valid_prog_environs = ['sod2d-mesh']
+    valid_prog_environs = ['builtin']
+    valid_systems       = ['*']
     build_system        = 'CMake'
     sourcesdir          = None
 
@@ -58,6 +67,7 @@ class Sod2dBuildTest(Sod2dBaseParams, rfm.CompileOnlyRegressionTest):
 
     @run_before('compile')
     def clone_repo(self):
+        # Make sure that sourcesdir is set appropriately (could be set via a parameter)
         self.prebuild_cmds = [
             f'git clone -b {self.branch} --depth=1 '
             f'https://gitlab.com/bsc_sod2d/sod2d_gitlab {self.sourcesdir}',
@@ -78,8 +88,10 @@ class Sod2dBuildTest(Sod2dBaseParams, rfm.CompileOnlyRegressionTest):
             sn.assert_not_found(r'error:', self.stderr),
             sn.all(sn.assert_exists(os.path.join(self.builddir, exe)) 
                    for exe in binaries),
-            sn.assert_found(rf'USE_GPU:BOOL={"ON" if self.use_gpu else "OFF"}',
-                           os.path.join(self.builddir, 'CMakeCache.txt'))
+            sn.assert_found(
+                rf'USE_GPU:BOOL={"ON" if self.use_gpu else "OFF"}',
+                os.path.join(self.builddir, 'CMakeCache.txt')
+            )
         ])
 
     @run_before('sanity')
