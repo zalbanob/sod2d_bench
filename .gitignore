@@ -1,4 +1,7 @@
 stage/
 output
 perflogs
+/meshes
+deprecated
+000*
 sod2d_bench.egg-info
