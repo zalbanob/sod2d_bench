@@ -175,24 +175,7 @@ step:
       grep "USE_GPU:BOOL=${gpu_flag}" ${build_dir_epicure}/CMakeCache.txt
 
   #-------------------------------------------------------------------------
-  # Merged Step: Run simulations for both the master and bsc-epicure-opt builds
-  # ensuring that each simulation runs in its own subdirectory.
-  #- name: simulation_all
-  #  depend: [mesh_gen_partition, build_all]
-  #  use: [global_params, build_params, mesh_params]
-  #  export: true
-  #  do:
-  #    # --- Master simulation ---
-  #    - echo "--- Master simulation ---"
-  #    - mkdir -p simulation_master
-  #    - cd simulation_master && python ${VALIDATION_DIR}/render.py --template ${VALIDATION_DIR}/templates/solvers/TGVCompSolver.mustache --output_dir . --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/ --param mesh_h5_file_name=mesh_n${side_len}_n${n_elements}_o${p_order}_partitions --param results_h5_file_path="" --param results_h5_file_name=results_build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} --output_name TGVCompSolver.json && export MASTER_RUN_RESULTS_PATH=$(pwd) && python ${VALIDATION_DIR}/render.py --template ${VALIDATION_DIR}/templates/scripts/run.mustache --output_dir . --output_name run.sh --param num_partitions=${num_partitions} --param exe_path=${SOD2D_EXEC_MASTER} --param solver_config=TGVCompSolver --param job_name=m_n${n_elements}_o${p_order} && sbatch run.sh
-  #    # --- Epicure simulation ---
-  #    - echo "--- Epicure simulation ---"
-  #    - mkdir -p simulation_epicure
-  #    - cd simulation_epicure && python ${VALIDATION_DIR}/render.py --template ${VALIDATION_DIR}/templates/solvers/TGVCompSolver.mustache --output_dir . --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/ --param mesh_h5_file_name=mesh_n${side_len}_n${n_elements}_o${p_order}_partitions --param results_h5_file_path="" --param results_h5_file_name=results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} --output_name TGVCompSolver.json && export EPICURE_RUN_RESULTS_PATH=$(pwd) && python ${VALIDATION_DIR}/render.py --template ${VALIDATION_DIR}/templates/scripts/run.mustache --output_dir . --output_name run.sh --param num_partitions=${num_partitions} --param exe_path=${SOD2D_EXEC_EPICURE} --param solver_config=TGVCompSolver --param job_name=e_n${n_elements}_o${p_order} && sbatch run.sh
-
-  #-------------------------------------------------------------------------
-  # Merged Step: Run simulations for both the master and bsc-epicure-opt builds
+  # Step 4: Run simulations for both the master and bsc-epicure-opt builds
   # ensuring that each simulation runs in its own subdirectory.
   - name: simulation_all
     depend: [mesh_gen_partition, build_all]
@@ -254,7 +237,7 @@ step:
       test -f simulation_epicure/results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/solution.hdf
 
   #-------------------------------------------------------------------------
-  # Step 7: TGV Analysis comparing simulation results.
+  # Step 5: TGV Analysis comparing simulation results.
   #- name: tgv_analysis
   #  depend: [simulation_all]
   #  use: [global_params, build_params, mesh_params]
