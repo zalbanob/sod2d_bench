@@ -1,0 +1,102 @@
+version: '1.0'
+name: MeshGen
+outpath: ./
+
+#-------------------------------------------------------------------------
+# Parameter space definitions
+parameterset:
+  # Global parameters for directories and executable locations.
+  - name: global_params
+    parameter:
+      - { name: base_dir, _: "/gpfs/projects/bsc99/bsc099260/EuroHPC/SOD2D" }
+      # Separate build directories for the master and bsc-epicure-opt builds.
+      - { name: build_dir_master, _: "build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
+      - { name: build_dir_epicure, _: "build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
+      # Executables
+      # - SOD2D_EXEC_MASTER 
+      # - SOD2D_EXEC_EPICURE
+      # - MESH_CONVERTER    
+      # The mesh partitioning tool is always built as a CPU tool.
+      - { name: MESH_CONVERTER_SCRIPT, _: "${base_dir}/SRC/OPT1/sod2d_gitlab/utils/gmsh2sod2d/gmsh2sod2d.py" }
+      - { name: VALIDATION_DIR, _: "${base_dir}/VALIDATION_FRAMEWORK" }
+
+  # Build parameters for SOD2D.
+  # Here we define:
+  #  - "gpu": a string used for naming (either "gpu" or "cpu")
+  #  - "gpu_flag": the value passed to CMake (should be "ON" when gpu=="gpu", "OFF" when gpu=="cpu")
+  # cpu
+  # OFF
+  - name: build_params
+    parameter:
+      - { name: gpu, _: [gpu] }
+      - { name: gpu_flag, _: [ON] }
+      - { name: build_type, _: "main" }
+      - { name: rp, type: int, _: 4 }
+      - { name: rp_vtk, type: int, _: 8 }
+      - { name: rp_avg, type: int, _: 8 }
+
+  # Mesh generation and partitioning parameters.
+  - name: mesh_params
+    parameter:
+      - { name: p_order, type: int, _: 4 }
+      - { name: n_elements, type: int, _: "4,8,16,32,64" }
+      - { name: num_partitions, type: int, _: 1 }  # For example, partition into 1 part.
+      - { name: side_len, type: float, _: 6.283185307179586 }
+      # The generated mesh prefix will be: mesh_n{side_len}_n{n_elements}_o{p_order}
+
+#-------------------------------------------------------------------------
+# Steps: complete workflow with dependencies.
+step:
+  # Step 0: Validate parameter consistency.
+  - name: validate_params
+    use: [build_params]
+    do: |
+      if [ "${gpu}" = "gpu" ] && [ "${gpu_flag}" != "True" ]; then
+        echo "ERROR: Inconsistent parameters: gpu is set to 'gpu' but gpu_flag is '${gpu_flag}' (should be ON)."
+        exit 1
+      fi
+      if [ "${gpu}" = "cpu" ] && [ "${gpu_flag}" != "False" ]; then
+        echo "ERROR: Inconsistent parameters: gpu is set to 'cpu' but gpu_flag is '${gpu_flag}' (should be OFF)."
+        exit 1
+      fi
+      echo "Parameter consistency check passed."
+    analyse: |
+      grep "Parameter consistency check passed" stdout
+
+  #-------------------------------------------------------------------------
+  # Step 2: Combined Mesh Generation and Partitioning.
+  - name: mesh_gen_partition
+    use: [global_params, mesh_params]
+    do:
+      - echo "MESH GENERATION STEP"
+      # Change into the mesh output directory (will be created by gen_mesh.py if needed)
+      - mkdir -p ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/
+      # Run gmsh to generate the mesh in MSH format
+      - cd ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}
+      # Generate the partition configuration file
+      - >
+        python ${VALIDATION_DIR}/render.py \
+          --template ${VALIDATION_DIR}/templates/meshes/cube/cube_config.mustache \
+          --output_dir ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} \
+          --output_name mesh_n${side_len}_n${n_elements}_o${p_order}_config.dat \
+          --param num_partitions=${num_partitions} \
+          --param mesh_prefix=mesh_n${side_len}_n${n_elements}_o${p_order}\
+          --param output_dir=${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}
+      # Generate the .geo file 
+      - >
+        python ${VALIDATION_DIR}/render.py \
+          --template ${VALIDATION_DIR}/templates/meshes/cube/cube_mesh.mustache \
+          --output_dir  ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} \
+          --output_name mesh_n${side_len}_n${n_elements}_o${p_order}.geo \
+          --param p_order=${p_order} \
+          --param n_elements=${n_elements} \
+          --param side_len=${side_len}
+      # Generate the mesh file  
+      - cd ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} && gmsh mesh_n${side_len}_n${n_elements}_o${p_order}.geo -o mesh_n${side_len}_n${n_elements}_o${p_order}.msh -0 
+      # Convert the .msh file to a SOD2D-compatible HDF mesh file
+      - cd ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} && python ${MESH_CONVERTER_SCRIPT} mesh_n${side_len}_n${n_elements}_o${p_order} -p 1
+      # Partition the mesh using mpirun; note that gen_mesh.py generated the config file
+      - cd ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} && mpirun -np ${num_partitions} /gpfs/projects/bsc99/bsc099260/EuroHPC/SOD2D/SRC/OPT1/sod2d_gitlab/build_cpu/tool_meshConversorPar/tool_meshConversorPar ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/mesh_n${side_len}_n${n_elements}_o${p_order}_config.dat
+
+    analyse: |
+      test -f ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/mesh_n${side_len}_n${n_elements}_o${p_order}_partitions.hdf

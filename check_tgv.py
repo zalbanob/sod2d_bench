@@ -25,7 +25,7 @@ def main():
             
             if rel_diff > args.tolerance:
                 print(f"Mismatch at ({i},{j}): {rel_diff:.2e} > {args.tolerance:.0e}")
-                #exit(1)
+                exit(1)
                 
             max_diff = max(max_diff, rel_diff)
     
