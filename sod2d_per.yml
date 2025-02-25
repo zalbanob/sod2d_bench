@@ -68,7 +68,7 @@ step:
   - name: build_tool
     use: [global_params, build_params, mesh_params]
     export: true
-    procs: 16
+    procs: 80
     do:
       - echo "TOOL BUILD STEP"
       - echo "Cloning repository for tool build..."
@@ -95,7 +95,7 @@ step:
   - name: mesh_gen_partition
     depend: build_tool
     use: [global_params, mesh_params]
-    procs: 16
+    procs: 80
     do:
       - >
         if [ -f ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-${num_partitions}.hdf ]; then
@@ -134,7 +134,7 @@ step:
 #  # Step 3: Build SOD2D for both master and bsc-epicure-opt branches.
   - name: build_all
     use: [global_params, build_params, mesh_params]
-    procs: 16
+    procs: 80
     export: true
     do:
       # --- Build the master branch ---
@@ -181,7 +181,7 @@ step:
     depend: [mesh_gen_partition, build_all]
     use: [global_params, build_params, mesh_params]
     export: true
-    procs: 16
+    procs: 80
     do:
       # --- Master simulation ---
       - echo "--- Master simulation ---"

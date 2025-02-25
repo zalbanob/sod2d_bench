@@ -18,4 +18,4 @@
 #SBATCH --account=bsc99
 
 ulimit -s unlimited
-mpirun -np {{num_partitions}}  {{exe_path}} {{solver_config}}
+nsys profile -t cuda,openacc,nvtx --cuda-memory-usage=true -f true -o profile_{{job_name}} mpirun -np {{num_partitions}}  {{exe_path}} {{solver_config}}

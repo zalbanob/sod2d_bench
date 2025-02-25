@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name={{job_name}}
+#SBATCH --job-name=profile_{{job_name}}
 
 #SBATCH -D .
 
@@ -11,11 +11,13 @@
 #SBATCH --ntasks=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=80
-#SBATCH --time=100:00:00
+#SBATCH --time=85:00:00
 #SBATCH --gres=gpu:1
 
 #SBATCH --qos=acc_bench
 #SBATCH --account=bsc99
 
 ulimit -s unlimited
-mpirun -np {{num_partitions}}  {{exe_path}} {{solver_config}}
+ncu --set full --target-processes all --import-source on -o profile_report mpirun -np {{num_partitions}}  {{exe_path}} {{solver_config}}
+ncu --csv --page raw -i profile_report.ncu-rep > profile_report.csv
+
