@@ -1,0 +1,98 @@
+// ----------- BEGIN INPUT ------------
+
+N = {{p_order}}; //p+1 (if DG)
+
+Retau = 950;
+
+nl   = Round(48./N);  // Coarse
+//nl = Round(96./N);  // Baseline
+//nl = Round(128./N); // Fine
+//nl = Round(64./N);  // 180
+
+
+ny   = Round(48./N);  // Coarse
+//ny = Round(96./N);  // Baseline
+//ny = Round(128./N); // Fine
+//ny = Round(64./N);  // 180
+
+r = 1.12^(N/2); // Coarse
+
+scale = {{scale}};
+
+// ----------- END INPUT --------------
+
+
+lx = 6.0 * scale; 
+lz = 3.0 * scale;
+ly = 2.0 * scale;
+
+
+lc = lx/nl;
+Printf("dx+ = %g",lc*Retau);
+Point(1) = {0, 0, 0, lc};
+line[] = Extrude {lx, 0, 0.} {
+  Point{1}; Layers{Round(nl)};
+};
+
+//Physical Line(1) = {line[1]};
+surface[] = Extrude {0, 0, lz} {
+  Line{line[1]}; Layers{nl}; Recombine;
+};
+
+Printf("ny = %g",ny);
+
+h0 = 0.5*(1-r)/(1-r^(ny/2));
+h=0.;
+For i In {0:(ny-2)/2}
+  h += h0*r^i;
+  y[i] = h;
+  y[ny-i-2] = (1-h);
+EndFor
+y[ny/2-1] = 0.5;
+y[ny-1] = 1.0;
+
+For i In {0:ny/2-1}
+  Printf("y+[%g] = %g", i, 2*Retau*y[i]);
+  layer[i] = 1;
+EndFor
+
+// Info for Must	
+Printf("y[%g] = %g", 0, 0);
+//Printf("y[%g] = %g", 1, 0.0+0.5*(y[0]-0.0));
+For i In {0:ny-1}
+  Printf("y[%g] = %g", i+1, y[i]*2.0);
+  //Printf("y[%g] = %g", i+1, y[i-1]+0.5*(y[i]-y[i-1]));
+EndFor
+aux = 0;
+For i In {0:nl}
+  Printf("x[%g] = %g", i,aux);
+  aux = aux+lx/nl;
+EndFor
+aux = 0;
+For i In {0:nl}
+  Printf("z[%g] = %g", i,aux);
+  aux = aux+lz/nl;
+EndFor
+
+For i In {0:ny-1}
+  layer[i] = 1;
+EndFor
+
+volume[] = Extrude {0.0,ly,0.0} {
+  Surface{surface[1]}; Layers{ layer[], y[] }; Recombine;
+};
+
+
+// Real entities
+Physical Surface("periodic") = {18,26,22,14};
+Physical Surface("wall") = {5,27};
+Physical Volume ("fluid") = {volume[1]};
+
+Mesh.MshFileVersion = 2.2;
+
+Mesh.ElementOrder = N;
+
+Mesh 3;
+
+Periodic Surface {18} = {26} Translate {lx, 0, 0};
+Periodic Surface {22} = {14} Translate {0, 0, lz};

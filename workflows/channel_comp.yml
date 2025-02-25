@@ -1,0 +1,234 @@
+version: '1.0'
+name: ChannelCompressableCase    # Combined benchmark with multiple sequential steps
+outpath: ./
+
+#-------------------------------------------------------------------------
+# Parameter space definitions
+parameterset:
+  # Global parameters for directories and executable locations.
+  - name: global_params
+    parameter:
+      - { name: base_dir, _: "/gpfs/projects/bsc99/bsc099260/EuroHPC/SOD2D" }
+      # Separate build directories for the master and bsc-epicure-opt builds.
+      - { name: build_dir_master, _ : "build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
+      - { name: build_dir_epicure, _: "build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
+      # Executables
+      # - SOD2D_EXEC_MASTER 
+      # - SOD2D_EXEC_EPICURE
+      # - MESH_CONVERTER    
+      # The mesh partitioning tool is always built as a CPU tool.
+      - { name: MESH_CONVERTER_SCRIPT, _: "${base_dir}/SRC/OPT1/sod2d_gitlab/utils/gmsh2sod2d/gmsh2sod2d.py" }
+      - { name: VALIDATION_DIR, _: "${base_dir}/VALIDATION_FRAMEWORK" }
+
+  # Build parameters for SOD2D.
+  # Here we define:
+  #  - "gpu": a string used for naming (either "gpu" or "cpu")
+  #  - "gpu_flag": the value passed to CMake (should be "ON" when gpu=="gpu", "OFF" when gpu=="cpu")
+  # cpu
+  # OFF
+  - name: build_params
+    parameter:
+      - { name: gpu, _: [gpu] }
+      - { name: gpu_flag, _: [ON] }
+      - { name: build_type, _: "main" }
+      - { name: rp, type: int, _: 4 }
+      - { name: rp_vtk, type: int, _: 8 }
+      - { name: rp_avg, type: int, _: 8 }
+
+  # Mesh generation and partitioning parameters.
+  - name: mesh_params
+    parameter:
+      - { name: p_order, type: int, _: "2,4,6,8" }
+      - { name: scale, type: float, _: "1.0,2.0,3.0,4.0" }
+
+#-------------------------------------------------------------------------
+# Steps: complete workflow with dependencies.
+step:
+  # Step 0: Validate parameter consistency.
+  - name: validate_params
+    use: [build_params]
+    do: |
+      if [ "${gpu}" = "gpu" ] && [ "${gpu_flag}" != "True" ]; then
+        echo "ERROR: Inconsistent parameters: gpu is set to 'gpu' but gpu_flag is '${gpu_flag}' (should be ON)."
+        exit 1
+      fi
+      if [ "${gpu}" = "cpu" ] && [ "${gpu_flag}" != "False" ]; then
+        echo "ERROR: Inconsistent parameters: gpu is set to 'cpu' but gpu_flag is '${gpu_flag}' (should be OFF)."
+        exit 1
+      fi
+      echo "Parameter consistency check passed."
+    analyse: |
+      grep "Parameter consistency check passed" stdout
+
+  #-------------------------------------------------------------------------
+  # Step 1: Build the CPU version of the mesh partitioning tool.
+  - name: build_tool
+    use: [global_params, build_params, mesh_params]
+    export: true
+    procs: 80
+    do:
+      - echo "TOOL BUILD STEP"
+      - echo "Cloning repository for tool build..."
+      #- git clone -b master --depth=1 https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_tool
+      - cgit https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_tool --branch master
+      - cd sod2d_gitlab_tool && git submodule update --init --recursive
+      - cd ..  # Return to the parent directory to avoid nested build paths
+      - mkdir -p build_tool_cpu_rp${rp}_vtk${rp_vtk}_avg${rp_avg}
+      - >
+        cd build_tool_cpu_rp${rp}_vtk${rp_vtk}_avg${rp_avg} &&
+        cmake ../sod2d_gitlab_tool \
+          -DUSE_PORDER=${p_order} -DUSE_RP=${rp} -DUSE_RP_VTK=${rp_vtk} -DUSE_RP_AVG=${rp_avg} \
+          -DCMAKE_C_COMPILER=${CC:-nvc} -DCMAKE_CUDA_COMPILER=${CMAKE_CUDA_COMPILER:-nvcc} \
+          -DUSE_GPU=OFF -DTOOL_MESHPART=ON
+      - cd build_tool_cpu_rp${rp}_vtk${rp_vtk}_avg${rp_avg} && make -j
+      - export MESH_CONVERTER=$(find $(pwd) -type f -name "tool_meshConversorPar")
+      - echo "WE EXPORTED $$MESH_CONVERTER"
+    analyse: |
+      test -f ${MESH_CONVERTER} &&
+      grep "USE_GPU:BOOL=OFF" build_tool_cpu_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/CMakeCache.txt
+
+  #-------------------------------------------------------------------------
+  # Step 2: Combined Mesh Generation and Partitioning.
+  - name: mesh_gen_partition
+    depend: build_tool
+    use: [global_params, mesh_params]
+    procs: 80
+    do:
+      - >
+        if [ -f  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale}/mesh_o${p_order}_s${scale}_partitions-${num_partitions}.hdf ]; then
+          echo "Mesh already generated. Skipping mesh generation.";
+        else
+          echo "MESH GENERATION STEP" &&
+          mkdir -p  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale}/ &&
+          cd  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} &&
+          # Generate the partition configuration file
+          python ${VALIDATION_DIR}/render.py \
+            --template ${VALIDATION_DIR}/templates/meshes/cahannel/channel_config.mustache \
+            --output_dir  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} \
+            --output_name mesh_o${p_order}_s${scale}_config.dat \
+            --param num_partitions=${num_partitions} \
+            --param mesh_prefix=mesh_o${p_order}_s${scale} \
+            --param output_dir= ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} &&
+          # Generate the .geo file
+          python ${VALIDATION_DIR}/render.py \
+            --template ${VALIDATION_DIR}/templates/meshes/channel/channel_mesh.mustache \
+            --output_dir  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} \
+            --output_name mesh_o${p_order}_s${scale}.geo \
+            --param p_order=${p_order} \
+            --param scale=${scale} \
+            --param side_len=${side_len} &&
+          # Generate the mesh file using gmsh
+          gmsh mesh_o${p_order}_s${scale}.geo -o mesh_o${p_order}_s${scale}.msh -0 &&
+          # Convert the .msh file to a SOD2D-compatible HDF mesh file
+          python ${MESH_CONVERTER_SCRIPT} mesh_o${p_order}_s${scale} -p 1 &&
+          # Partition the mesh using mpirun (config file was generated above)
+          mpirun -np ${num_partitions} $$MESH_CONVERTER  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale}/mesh_o${p_order}_s${scale}_config.dat;
+        fi
+    analyse: |
+      test -f  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale}/mesh_o${p_order}_s${scale}_partitions-${num_partitions}.hdf
+
+#-------------------------------------------------------------------------
+#  # Step 3: Build SOD2D for both master and bsc-epicure-opt branches.
+  - name: build_all
+    use: [global_params, build_params, mesh_params]
+    procs: 80
+    export: true
+    do:
+      # --- Build the master branch ---
+      - echo "MASTER BUILD STEP"
+      - echo "Cloning repository for master build..."
+      #- git clone -b master --depth=1 https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_master
+      - cgit https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_master --branch master
+      - cd sod2d_gitlab_master && git submodule update --init --recursive
+      - mkdir -p ${build_dir_master}
+      - >
+        cd ${build_dir_master} &&
+        cmake ../sod2d_gitlab_master \
+          -DUSE_PORDER=${p_order} -DUSE_RP=${rp} -DUSE_RP_VTK=${rp_vtk} -DUSE_RP_AVG=${rp_avg} \
+          -DUSE_GPU=${gpu_flag} -DTOOL_MESHPART=OFF
+      - cd ${build_dir_master} && make -j && export SOD2D_EXEC_MASTER=$(find $(pwd) -type f -name "sod2d")
+      - echo "Master build complete."
+
+      # --- Build the bsc-epicure-opt branch ---
+      - echo "EPICURE BUILD STEP"
+      - echo "Cloning repository for bsc-epicure-opt build..."
+      #- git clone -b bsc-epicure-opt --depth=1 https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_epicure
+      - cgit https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_epicure --branch bsc-epicure-opt
+      - cd sod2d_gitlab_epicure && git submodule update --init --recursive
+      - mkdir -p ${build_dir_epicure}
+      - >
+        cd ${build_dir_epicure} &&
+        cmake ../sod2d_gitlab_epicure \
+          -DUSE_PORDER=${p_order} -DUSE_RP=${rp} -DUSE_RP_VTK=${rp_vtk} -DUSE_RP_AVG=${rp_avg} \
+          -DUSE_GPU=${gpu_flag} -DTOOL_MESHPART=OFF
+      - cd ${build_dir_epicure} && make -j && export SOD2D_EXEC_EPICURE=$(find $(pwd) -type f -name "sod2d")
+      - echo "Epicure build complete."
+    analyse: |
+      test -f ${SOD2D_EXEC_MASTER} &&
+      test -f ${MESH_CONVERTER} &&
+      grep "USE_GPU:BOOL=${gpu_flag}" ${build_dir_master}/CMakeCache.txt &&
+      test -f ${SOD2D_EXEC_EPICURE} &&
+      test -f ${MESH_CONVERTER} &&
+      grep "USE_GPU:BOOL=${gpu_flag}" ${build_dir_epicure}/CMakeCache.txt
+
+  #-------------------------------------------------------------------------
+  # Step 4: Run simulations for both the master and bsc-epicure-opt builds
+  # ensuring that each simulation runs in its own subdirectory.
+  - name: simulation_all
+    depend: [mesh_gen_partition, build_all]
+    use: [global_params, build_params, mesh_params]
+    export: true
+    procs: 80
+    do:
+      # --- Master simulation ---
+      - echo "--- Master simulation ---"
+      - >
+        mkdir -p simulation_master &&
+        cd simulation_master &&
+        python ${VALIDATION_DIR}/render.py \
+          --template ${VALIDATION_DIR}/templates/solvers/ChannelFlowSolver.mustache \
+          --output_dir . \
+          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/scale${scale}/ \
+          --param mesh_h5_file_name=mesh_o${p_order}_s${scale}_partitions \
+          --param results_h5_file_path="" \
+          --param results_h5_file_name=results_build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} \
+          --output_name ChannelFlowSolver.json &&
+        export MASTER_RUN_RESULTS_PATH=$(pwd) &&
+        python ${VALIDATION_DIR}/render.py \
+          --template ${VALIDATION_DIR}/templates/scripts/run.mustache \
+          --output_dir . \
+          --output_name run.sh \
+          --param num_partitions=${num_partitions} \
+          --param exe_path=${SOD2D_EXEC_MASTER} \
+          --param solver_config=ChannelFlowSolver \
+          --param job_name=m_o${p_order}_s${scale} &&
+        sbatch run.sh
+
+      # --- Epicure simulation ---
+      - echo "--- Epicure simulation ---"
+      - >
+        mkdir -p simulation_epicure &&
+        cd simulation_epicure &&
+        python ${VALIDATION_DIR}/render.py \
+          --template ${VALIDATION_DIR}/templates/solvers/ChannelFlowSolver.mustache \
+          --output_dir . \
+          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale}/ \
+          --param mesh_h5_file_name=mesh_o${p_order}_s${scale}_partitions \
+          --param results_h5_file_path="" \
+          --param results_h5_file_name=results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} \
+          --output_name ChannelFlowSolver.json &&
+        export EPICURE_RUN_RESULTS_PATH=$(pwd) &&
+        python ${VALIDATION_DIR}/render.py \
+          --template ${VALIDATION_DIR}/templates/scripts/run.mustache \
+          --output_dir . \
+          --output_name run.sh \
+          --param num_partitions=${num_partitions} \
+          --param exe_path=${SOD2D_EXEC_EPICURE} \
+          --param solver_config=ChannelFlowSolver \
+          --param job_name=e_o${p_order}_s${scale} &&
+        sbatch run.sh
+    analyse: |
+      grep "Simulation completed successfully" simulation_master/stdout &&
+      test -f simulation_master/results_build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/solution.hdf &&
+      grep "Simulation completed successfully" simulation_epicure/stdout &&
+      test -f simulation_epicure/results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/solution.hdf
