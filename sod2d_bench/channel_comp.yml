@@ -68,13 +68,13 @@ step:
       echo "Prestage commit: ${PRESTAGE_COMMIT}"
       export MERGE_BASE=$(curl -s "${GITLAB_URL}/projects/${PROJECT_ID}/repository/merge_base?refs[]=${MASTER_COMMIT}&refs[]=${PRESTAGE_COMMIT}" | jq -r '.id')
       if [ "$MERGE_BASE" = "$MASTER_COMMIT" ]; then
-        echo "✅ Master commit ${MASTER_COMMIT} is merged into bsc-epicure-opt."
+        echo "[PASS] Master commit ${MASTER_COMMIT} is merged into bsc-epicure-opt."
       else
-        echo "❌ Master commit ${MASTER_COMMIT} is NOT merged into bsc-epicure-opt. Merge required!"
+        echo "[FAIL] Master commit ${MASTER_COMMIT} is NOT merged into bsc-epicure-opt. Merge required!"
         exit 1
       fi
     analyse: |
-      grep "✅ Master commit" stdout
+      grep "[PASS] Master commit" stdout
 
   # Step 0-1: Validate parameter consistency.
   - name: validate_params
