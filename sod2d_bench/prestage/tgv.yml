@@ -1,6 +1,6 @@
 version: '1.0'
 name: Sod2dFullBenchmark    # Combined benchmark with multiple sequential steps
-outpath: ./
+outpath: ../../
 
 #-------------------------------------------------------------------------
 # Parameter space definitions
@@ -38,8 +38,8 @@ parameterset:
   # Mesh generation and partitioning parameters.
   - name: mesh_params
     parameter:
-      - { name: p_order, type: int, _: "2,3,4,5,6,7,8,9" }
-      - { name: n_elements, type: int, _: "3,4,8,16,32,64" }
+      - { name: p_order, type: int, _: "9" }
+      - { name: n_elements, type: int, _: "8,16" }
       - { name: num_partitions, type: int, _: 1 }  # For example, partition into 1 part.
       - { name: side_len, type: float, _: 6.283185307179586 }
       # The generated mesh prefix will be: mesh_n{side_len}_n{n_elements}_o{p_order}
@@ -47,8 +47,40 @@ parameterset:
 #-------------------------------------------------------------------------
 # Steps: complete workflow with dependencies.
 step:
-  # Step 0: Validate parameter consistency.
+  - name: check_master_merged
+    do: |
+      export GITLAB_URL="https://gitlab.com/api/v4"
+      export PROJECT_ID="34192512"
+      export REPO_URL="https://gitlab.com/bsc_sod2d/sod2d_gitlab"
+
+      MASTER_COMMIT=$(git ls-remote "$REPO_URL" refs/heads/master | cut -f1)
+      if [ -z "$MASTER_COMMIT" ]; then
+        echo "ERROR: Could not retrieve master commit from $REPO_URL."
+        exit 1
+      fi
+
+      # Retrieve the latest commit hash for bsc-epicure-opt-prestage
+      export PRESTAGE_COMMIT=$(git ls-remote "$REPO_URL" refs/heads/bsc-epicure-opt-prestage | cut -f1)
+      if [ -z "$PRESTAGE_COMMIT" ]; then
+        echo "ERROR: Could not retrieve bsc-epicure-opt-prestage commit from $REPO_URL."
+        exit 1
+      fi
+
+      echo "Master commit: ${MASTER_COMMIT}"
+      echo "Prestage commit: ${PRESTAGE_COMMIT}"
+      export MERGE_BASE=$(curl -s "${GITLAB_URL}/projects/${PROJECT_ID}/repository/merge_base?refs[]=${MASTER_COMMIT}&refs[]=${PRESTAGE_COMMIT}" | jq -r '.id')
+      if [ "$MERGE_BASE" = "$MASTER_COMMIT" ]; then
+        echo "✅ Master commit ${MASTER_COMMIT} is merged into bsc-epicure-opt-prestage."
+      else
+        echo "❌ Master commit ${MASTER_COMMIT} is NOT merged into bsc-epicure-opt-prestage. Merge required!"
+        exit 1
+      fi
+    analyse: |
+      grep "✅ Master commit" stdout
+
+  # Step 0-1: Validate parameter consistency.
   - name: validate_params
+    depend: check_master_merged
     use: [build_params]
     do: |
       if [ "${gpu}" = "gpu" ] && [ "${gpu_flag}" != "True" ]; then
@@ -156,7 +188,7 @@ step:
       - echo "EPICURE BUILD STEP"
       - echo "Cloning repository for bsc-epicure-opt build..."
       #- git clone -b bsc-epicure-opt --depth=1 https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_epicure
-      - cgit https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_epicure --branch bsc-epicure-opt
+      - cgit https://gitlab.com/bsc_sod2d/sod2d_gitlab sod2d_gitlab_epicure --branch bsc-epicure-opt-prestage
       - cd sod2d_gitlab_epicure && git submodule update --init --recursive
       - mkdir -p ${build_dir_epicure}
       - >
@@ -198,7 +230,7 @@ step:
           --output_name TGVCompSolver.json &&
         export MASTER_RUN_RESULTS_PATH=$(pwd) &&
         python ${VALIDATION_DIR}/render.py \
-          --template ${VALIDATION_DIR}/templates/scripts/run.mustache \
+          --template ${VALIDATION_DIR}/templates/scripts/nsys.mustache \
           --output_dir . \
           --output_name run.sh \
           --param num_partitions=${num_partitions} \
@@ -222,7 +254,7 @@ step:
           --output_name TGVCompSolver.json &&
         export EPICURE_RUN_RESULTS_PATH=$(pwd) &&
         python ${VALIDATION_DIR}/render.py \
-          --template ${VALIDATION_DIR}/templates/scripts/run.mustache \
+          --template ${VALIDATION_DIR}/templates/scripts/nsys.mustache \
           --output_dir . \
           --output_name run.sh \
           --param num_partitions=${num_partitions} \
@@ -236,17 +268,4 @@ step:
       grep "Simulation completed successfully" simulation_epicure/stdout &&
       test -f simulation_epicure/results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/solution.hdf
 
-  #-------------------------------------------------------------------------
-  # Step 5: TGV Analysis comparing simulation results.
-  #- name: tgv_analysis
-  #  depend: [simulation_all]
-  #  use: [global_params, build_params, mesh_params]
-  #  do: 
-  #    - echo ">>>>>>>>>>>>>>>>>>>>> MASTER RES = $$MASTER_RUN_RESULTS_PATH"
-  #    - echo ">>>>>>>>>>>>>>>>>>>>> EPICRE RES = $$EPICURE_RUN_RESULTS_PATH"
-  #    - echo ">>>>>>>>>>>>>>>>>>>>> MASTER RUN = $$SOD2D_EXEC_MASTER"
-  #    - echo ">>>>>>>>>>>>>>>>>>>>> EPICRE RUN = $$SOD2D_EXEC_EPICURE"
-  #    - python ${VALIDATION_DIR}/check_tgv.py --current $$EPICURE_RUN_RESULTS_PATH/analysis_mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-1.dat --reference $$MASTER_RUN_RESULTS_PATH/analysis_mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-1.dat --tolerance 1e-4
-  #  analyse: |
-  #    grep "All results match within tolerance" stdout &&
-  #    test $(grep -c "Mismatch" stdout) -eq 0
+ 

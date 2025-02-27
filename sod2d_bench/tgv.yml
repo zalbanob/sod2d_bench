@@ -47,8 +47,41 @@ parameterset:
 #-------------------------------------------------------------------------
 # Steps: complete workflow with dependencies.
 step:
-  # Step 0: Validate parameter consistency.
+  # Step 0-0: Validate parameter consistency.
+  - name: check_master_merged
+    do: |
+      export GITLAB_URL="https://gitlab.com/api/v4"
+      export PROJECT_ID="34192512"
+      export REPO_URL="https://gitlab.com/bsc_sod2d/sod2d_gitlab"
+
+      MASTER_COMMIT=$(git ls-remote "$REPO_URL" refs/heads/master | cut -f1)
+      if [ -z "$MASTER_COMMIT" ]; then
+        echo "ERROR: Could not retrieve master commit from $REPO_URL."
+        exit 1
+      fi
+
+      # Retrieve the latest commit hash for bsc-epicure-opt
+      export PRESTAGE_COMMIT=$(git ls-remote "$REPO_URL" refs/heads/bsc-epicure-opt | cut -f1)
+      if [ -z "$PRESTAGE_COMMIT" ]; then
+        echo "ERROR: Could not retrieve bsc-epicure-opt commit from $REPO_URL."
+        exit 1
+      fi
+
+      echo "Master commit: ${MASTER_COMMIT}"
+      echo "Prestage commit: ${PRESTAGE_COMMIT}"
+      export MERGE_BASE=$(curl -s "${GITLAB_URL}/projects/${PROJECT_ID}/repository/merge_base?refs[]=${MASTER_COMMIT}&refs[]=${PRESTAGE_COMMIT}" | jq -r '.id')
+      if [ "$MERGE_BASE" = "$MASTER_COMMIT" ]; then
+        echo "✅ Master commit ${MASTER_COMMIT} is merged into bsc-epicure-opt."
+      else
+        echo "❌ Master commit ${MASTER_COMMIT} is NOT merged into bsc-epicure-opt. Merge required!"
+        exit 1
+      fi
+    analyse: |
+      grep "✅ Master commit" stdout
+
+  # Step 0-1: Validate parameter consistency.
   - name: validate_params
+    depend: check_master_merged
     use: [build_params]
     do: |
       if [ "${gpu}" = "gpu" ] && [ "${gpu_flag}" != "True" ]; then
