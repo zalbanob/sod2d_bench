@@ -1,6 +1,6 @@
 version: '1.0'
 name: ChannelCompressableCase    # Combined benchmark with multiple sequential steps
-outpath: ./
+outpath: ../
 
 #-------------------------------------------------------------------------
 # Parameter space definitions
@@ -40,6 +40,7 @@ parameterset:
     parameter:
       - { name: p_order, type: int, _: "2,4,6,8" }
       - { name: scale, type: float, _: "1.0,2.0,3.0,4.0" }
+      - { name: num_partitions, type: int,   _: 1 }
 
 #-------------------------------------------------------------------------
 # Steps: complete workflow with dependencies.
@@ -104,15 +105,15 @@ step:
           # Generate the partition configuration file
           python ${VALIDATION_DIR}/render.py \
             --template ${VALIDATION_DIR}/templates/meshes/cahannel/channel_config.mustache \
-            --output_dir  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} \
+            --output_dir ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} \
             --output_name mesh_o${p_order}_s${scale}_config.dat \
             --param num_partitions=${num_partitions} \
             --param mesh_prefix=mesh_o${p_order}_s${scale} \
-            --param output_dir= ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} &&
+            --param output_dir=${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} &&
           # Generate the .geo file
           python ${VALIDATION_DIR}/render.py \
             --template ${VALIDATION_DIR}/templates/meshes/channel/channel_mesh.mustache \
-            --output_dir  ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} \
+            --output_dir ${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale} \
             --output_name mesh_o${p_order}_s${scale}.geo \
             --param p_order=${p_order} \
             --param scale=${scale} \
@@ -188,7 +189,7 @@ step:
         python ${VALIDATION_DIR}/render.py \
           --template ${VALIDATION_DIR}/templates/solvers/ChannelFlowSolver.mustache \
           --output_dir . \
-          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/scale${scale}/ \
+          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/channel/comp/p${p_order}/${scale}/ \
           --param mesh_h5_file_name=mesh_o${p_order}_s${scale}_partitions \
           --param results_h5_file_path="" \
           --param results_h5_file_name=results_build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} \

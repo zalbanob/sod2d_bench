@@ -1,5 +1,5 @@
 version: '1.0'
-name: ChannelIncompressableCase    # Combined benchmark with multiple sequential steps
+name: Sod2dFullBenchmark    # Combined benchmark with multiple sequential steps
 outpath: ./
 
 #-------------------------------------------------------------------------
@@ -10,7 +10,7 @@ parameterset:
     parameter:
       - { name: base_dir, _: "/gpfs/projects/bsc99/bsc099260/EuroHPC/SOD2D" }
       # Separate build directories for the master and bsc-epicure-opt builds.
-      - { name: build_dir_master, _ : "build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
+      - { name: build_dir_master, _: "build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
       - { name: build_dir_epicure, _: "build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}" }
       # Executables
       # - SOD2D_EXEC_MASTER 
@@ -38,8 +38,11 @@ parameterset:
   # Mesh generation and partitioning parameters.
   - name: mesh_params
     parameter:
-      - { name: p_order, type: int, _: "2,4,6,8" }
-      - { name: scale, type: float, _: "1.0,2.0,3.0,4.0" }
+      - { name: p_order, type: int, _: "2,3,4,5,6,7,8,9" }
+      - { name: n_elements, type: int, _: "3,4,8,16,32,64" }
+      - { name: num_partitions, type: int, _: 1 }  # For example, partition into 1 part.
+      - { name: side_len, type: float, _: 6.283185307179586 }
+      # The generated mesh prefix will be: mesh_n{side_len}_n{n_elements}_o{p_order}
 
 #-------------------------------------------------------------------------
 # Steps: complete workflow with dependencies.
@@ -95,37 +98,37 @@ step:
     procs: 80
     do:
       - >
-        if [ -f  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale}/mesh_o${p_order}_s${scale}_partitions-${num_partitions}.hdf ]; then
+        if [ -f ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-${num_partitions}.hdf ]; then
           echo "Mesh already generated. Skipping mesh generation.";
         else
           echo "MESH GENERATION STEP" &&
-          mkdir -p  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale}/ &&
-          cd  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale} &&
+          mkdir -p ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/ &&
+          cd ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} &&
           # Generate the partition configuration file
           python ${VALIDATION_DIR}/render.py \
-            --template ${VALIDATION_DIR}/templates/meshes/cahannel/channel_config.mustache \
-            --output_dir  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale} \
-            --output_name mesh_o${p_order}_s${scale}_config.dat \
+            --template ${VALIDATION_DIR}/templates/meshes/cube/cube_config.mustache \
+            --output_dir ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} \
+            --output_name mesh_n${side_len}_n${n_elements}_o${p_order}_config.dat \
             --param num_partitions=${num_partitions} \
-            --param mesh_prefix=mesh_o${p_order}_s${scale} \
-            --param output_dir= ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale} &&
+            --param mesh_prefix=mesh_n${side_len}_n${n_elements}_o${p_order} \
+            --param output_dir=${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} &&
           # Generate the .geo file
           python ${VALIDATION_DIR}/render.py \
-            --template ${VALIDATION_DIR}/templates/meshes/channel/channel_mesh.mustache \
-            --output_dir  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale} \
-            --output_name mesh_o${p_order}_s${scale}.geo \
+            --template ${VALIDATION_DIR}/templates/meshes/cube/cube_mesh.mustache \
+            --output_dir ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements} \
+            --output_name mesh_n${side_len}_n${n_elements}_o${p_order}.geo \
             --param p_order=${p_order} \
-            --param scale=${scale} \
+            --param n_elements=${n_elements} \
             --param side_len=${side_len} &&
           # Generate the mesh file using gmsh
-          gmsh mesh_o${p_order}_s${scale}.geo -o mesh_o${p_order}_s${scale}.msh -0 &&
+          gmsh mesh_n${side_len}_n${n_elements}_o${p_order}.geo -o mesh_n${side_len}_n${n_elements}_o${p_order}.msh -0 &&
           # Convert the .msh file to a SOD2D-compatible HDF mesh file
-          python ${MESH_CONVERTER_SCRIPT} mesh_o${p_order}_s${scale} -p 1 &&
+          python ${MESH_CONVERTER_SCRIPT} mesh_n${side_len}_n${n_elements}_o${p_order} -p 1 &&
           # Partition the mesh using mpirun (config file was generated above)
-          mpirun -np ${num_partitions} $$MESH_CONVERTER  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale}/mesh_o${p_order}_s${scale}_config.dat;
+          mpirun -np ${num_partitions} $$MESH_CONVERTER ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/mesh_n${side_len}_n${n_elements}_o${p_order}_config.dat;
         fi
     analyse: |
-      test -f  ${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale}/mesh_o${p_order}_s${scale}_partitions-${num_partitions}.hdf
+      test -f ${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-${num_partitions}.hdf
 
 #-------------------------------------------------------------------------
 #  # Step 3: Build SOD2D for both master and bsc-epicure-opt branches.
@@ -186,13 +189,13 @@ step:
         mkdir -p simulation_master &&
         cd simulation_master &&
         python ${VALIDATION_DIR}/render.py \
-          --template ${VALIDATION_DIR}/templates/solvers/ChannelFlowSolverIncomp.mustache \
+          --template ${VALIDATION_DIR}/templates/solvers/TGVCompSolver.mustache \
           --output_dir . \
-          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/scale${scale}/ \
-          --param mesh_h5_file_name=mesh_o${p_order}_s${scale}_partitions \
+          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/ \
+          --param mesh_h5_file_name=mesh_n${side_len}_n${n_elements}_o${p_order}_partitions \
           --param results_h5_file_path="" \
           --param results_h5_file_name=results_build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} \
-          --output_name ChannelFlowSolverIncomp.json &&
+          --output_name TGVCompSolver.json &&
         export MASTER_RUN_RESULTS_PATH=$(pwd) &&
         python ${VALIDATION_DIR}/render.py \
           --template ${VALIDATION_DIR}/templates/scripts/run.mustache \
@@ -200,8 +203,8 @@ step:
           --output_name run.sh \
           --param num_partitions=${num_partitions} \
           --param exe_path=${SOD2D_EXEC_MASTER} \
-          --param solver_config=ChannelFlowSolverIncomp \
-          --param job_name=m_o${p_order}_s${scale} &&
+          --param solver_config=TGVCompSolver \
+          --param job_name=m_n${n_elements}_o${p_order} &&
         sbatch run.sh
 
       # --- Epicure simulation ---
@@ -210,13 +213,13 @@ step:
         mkdir -p simulation_epicure &&
         cd simulation_epicure &&
         python ${VALIDATION_DIR}/render.py \
-          --template ${VALIDATION_DIR}/templates/solvers/ChannelFlowSolverIncomp.mustache \
+          --template ${VALIDATION_DIR}/templates/solvers/TGVCompSolver.mustache \
           --output_dir . \
-          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/channel/incom/p${p_order}/${scale}/ \
-          --param mesh_h5_file_name=mesh_o${p_order}_s${scale}_partitions \
+          --param mesh_h5_file_path=${VALIDATION_DIR}/meshes/p${p_order}/ne${n_elements}/ \
+          --param mesh_h5_file_name=mesh_n${side_len}_n${n_elements}_o${p_order}_partitions \
           --param results_h5_file_path="" \
           --param results_h5_file_name=results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg} \
-          --output_name ChannelFlowSolverIncomp.json &&
+          --output_name TGVCompSolver.json &&
         export EPICURE_RUN_RESULTS_PATH=$(pwd) &&
         python ${VALIDATION_DIR}/render.py \
           --template ${VALIDATION_DIR}/templates/scripts/run.mustache \
@@ -224,11 +227,26 @@ step:
           --output_name run.sh \
           --param num_partitions=${num_partitions} \
           --param exe_path=${SOD2D_EXEC_EPICURE} \
-          --param solver_config=ChannelFlowSolverIncomp \
-          --param job_name=e_o${p_order}_s${scale} &&
+          --param solver_config=TGVCompSolver \
+          --param job_name=e_n${n_elements}_o${p_order} &&
         sbatch run.sh
     analyse: |
       grep "Simulation completed successfully" simulation_master/stdout &&
       test -f simulation_master/results_build_master_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/solution.hdf &&
       grep "Simulation completed successfully" simulation_epicure/stdout &&
       test -f simulation_epicure/results_build_epicure_${gpu}_rp${rp}_vtk${rp_vtk}_avg${rp_avg}/solution.hdf
+
+  #-------------------------------------------------------------------------
+  # Step 5: TGV Analysis comparing simulation results.
+  #- name: tgv_analysis
+  #  depend: [simulation_all]
+  #  use: [global_params, build_params, mesh_params]
+  #  do: 
+  #    - echo ">>>>>>>>>>>>>>>>>>>>> MASTER RES = $$MASTER_RUN_RESULTS_PATH"
+  #    - echo ">>>>>>>>>>>>>>>>>>>>> EPICRE RES = $$EPICURE_RUN_RESULTS_PATH"
+  #    - echo ">>>>>>>>>>>>>>>>>>>>> MASTER RUN = $$SOD2D_EXEC_MASTER"
+  #    - echo ">>>>>>>>>>>>>>>>>>>>> EPICRE RUN = $$SOD2D_EXEC_EPICURE"
+  #    - python ${VALIDATION_DIR}/check_tgv.py --current $$EPICURE_RUN_RESULTS_PATH/analysis_mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-1.dat --reference $$MASTER_RUN_RESULTS_PATH/analysis_mesh_n${side_len}_n${n_elements}_o${p_order}_partitions-1.dat --tolerance 1e-4
+  #  analyse: |
+  #    grep "All results match within tolerance" stdout &&
+  #    test $(grep -c "Mismatch" stdout) -eq 0
